@@ -153,28 +153,43 @@
 
             if (rows.length < 2) return;
 
-            const header = rows[0];
+            // ทำความสะอาด Header โดยการ trim หัวท้าย
+            const header = rows[0].map(h => h.trim());
             const dataRows = rows.slice(1);
 
-            // เจาะจงหัวข้อคอลัมน์ตามที่ระบุ
-            const targetColName = "เลขที่ (ของฉัน) *ไม่ต้องใส่เลข 0 นำหน้า";
-            const idCol = header.findIndex(h => h.trim() === targetColName);
+            // เจาะจงหัวข้อคอลัมน์เป้าหมาย
+            const targetIdHeader = "เลขที่ (ของฉัน) *ไม่ต้องใส่เลข 0 นำหน้า";
             
-            // Fallback กรณีหาชื่อเต็มไม่เจอ ให้หาคำว่า "เลขที่" แทน
-            const finalIdCol = idCol !== -1 ? idCol : header.findIndex(h => h.includes('เลขที่'));
+            // ค้นหาตำแหน่ง ID Column โดยเน้นการแมตช์ที่ตรงตัวที่สุด
+            let idCol = header.indexOf(targetIdHeader);
+            
+            // ถ้าหาไม่เจอแบบตรงตัว (Case Sensitive/Trim) ให้ลองหาหัวข้อที่ขึ้นต้นด้วยคำที่ระบุ
+            if (idCol === -1) {
+                idCol = header.findIndex(h => h.startsWith("เลขที่ (ของฉัน)"));
+            }
+
+            // ถ้ายังหาไม่เจออีกจริงๆ ถึงจะใช้ Fallback เป็นคำว่า "เลขที่" แต่จะไม่เอาหัวข้ออื่นที่มีคำว่า "เลขที่" ต่อท้าย
+            if (idCol === -1) {
+                idCol = header.findIndex(h => h === "เลขที่");
+            }
+
+            // ค้นหาตำแหน่ง Message Column
             const msgCol = header.findIndex(h => h.includes('อยากบอกอะไร'));
 
             const uniqueMap = new Map();
             
             dataRows.forEach(row => {
-                const idValue = row[finalIdCol];
+                // ตรวจสอบตำแหน่ง column ว่ามีข้อมูลจริงหรือไม่
+                if (idCol === -1 || row.length <= idCol) return;
+
+                const idValue = row[idCol];
                 if (!idValue || idValue === "") return;
 
-                const currentTimeStr = row[0];
+                const currentTimeStr = row[0]; // Timestamp ปกติอยู่ column แรก
                 const currentTimeVal = getTimestampValue(currentTimeStr);
                 const existingEntry = uniqueMap.get(idValue);
                 
-                // ตรวจสอบและเก็บเฉพาะข้อมูลที่ใหม่ที่สุดตามวันเวลา
+                // ตรวจสอบความสดใหม่ของข้อมูล
                 if (!existingEntry || currentTimeVal >= getTimestampValue(existingEntry.time)) {
                     uniqueMap.set(idValue, {
                         id: idValue,
@@ -188,8 +203,10 @@
             
             updateStats(masterData.length);
             
-            const currentSearch = document.getElementById('searchInput').value.trim();
-            render(masterData.filter(d => d.id === currentSearch || d.id.includes(currentSearch)), currentSearch !== "");
+            // กรองการแสดงผลตามช่องค้นหา
+            const searchInput = document.getElementById('searchInput');
+            const currentSearch = searchInput ? searchInput.value.trim() : "";
+            render(masterData.filter(d => d.id === currentSearch || d.id === Number(currentSearch).toString()), currentSearch !== "");
         }
 
         function render(data, isSearching) {
@@ -241,12 +258,16 @@
         }
 
         function updateStats(count) {
-            document.getElementById('stats').innerText = `ข้อมูลออนไลน์: ${count} เลขที่`;
+            const statsElement = document.getElementById('stats');
+            if (statsElement) {
+                statsElement.innerText = `ข้อมูลออนไลน์: ${count} เลขที่`;
+            }
         }
 
         document.getElementById('searchInput').addEventListener('input', (e) => {
             const val = e.target.value.trim();
-            const filtered = masterData.filter(d => d.id === val || d.id.includes(val));
+            // ค้นหาแบบตรงตัว (Exact match สำหรับ ID)
+            const filtered = masterData.filter(d => d.id === val || d.id === Number(val).toString());
             render(filtered, val !== "");
         });
 
