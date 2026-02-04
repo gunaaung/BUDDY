@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buddy Message Dashboard - Live Update</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Kanit', sans-serif; background-color: #f8fafc; }
+        .id-badge { background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); }
+        .card-animate { transition: all 0.2s ease-in-out; }
+        .card-animate:hover { transform: scale(1.02); }
+        .loader {
+            border: 3px solid #e2e8f0;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .sync-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+    </style>
+</head>
+<body class="p-4 md:p-10">
+
+    <div class="max-w-6xl mx-auto">
+        <!-- Header -->
+        <header class="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-slate-200 pb-6">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-3">
+                    🎁 ข้อความถึงบัดดี้ 
+                    <span id="liveIndicator" class="hidden flex h-3 w-3 rounded-full bg-green-500 sync-pulse"></span>
+                </h1>
+                <p class="text-slate-500 mt-1">กรุณากรอก <span class="font-semibold text-blue-600">เลขที่</span> เพื่อดูข้อความล่าสุด</p>
+            </div>
+            <div class="flex flex-col items-end gap-2 text-right">
+                <div id="stats" class="text-sm font-medium text-slate-500">
+                    กำลังตรวจสอบข้อมูล...
+                </div>
+                <button onclick="init(false, true)" class="flex items-center gap-2 text-[11px] bg-slate-200 hover:bg-blue-600 hover:text-white text-slate-600 px-3 py-1 rounded-full transition-all font-medium">
+                    <svg id="refreshIcon" xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    บังคับดึงข้อมูลใหม่ (Force Refresh)
+                </button>
+                <div id="lastSyncTime" class="text-[10px] text-slate-400 font-mono italic">
+                    Sync ล่าสุด: กำลังโหลด...
+                </div>
+            </div>
+        </header>
+
+        <!-- Search Area -->
+        <div class="mb-8">
+            <div class="relative max-w-md mx-auto md:mx-0">
+                <input type="text" id="searchInput" autocomplete="off" placeholder="พิมพ์เลขที่ของคุณที่นี่..." 
+                    class="w-full pl-12 pr-4 py-4 bg-white border-2 border-blue-100 rounded-2xl shadow-lg shadow-blue-50 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all text-lg font-medium text-slate-700">
+                <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-blue-500">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                </div>
+                <div id="searchLoader" class="hidden absolute inset-y-0 right-4 flex items-center">
+                    <div class="loader"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Welcome State -->
+        <div id="welcomeState" class="flex flex-col items-center py-20 text-slate-400">
+            <div class="text-6xl mb-6 opacity-50">⌨️</div>
+            <h2 class="text-xl font-medium text-slate-600 mb-2">รอการตรวจสอบ</h2>
+            <p class="text-slate-400 text-center">ระบุเลขที่อ้างอิงด้านบนเพื่อแสดงข้อความล่าสุดของคุณ</p>
+        </div>
+
+        <div id="messageGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 hidden">
+            <!-- Content -->
+        </div>
+
+        <div id="emptyState" class="hidden flex flex-col items-center py-20 text-slate-400">
+            <div class="text-5xl mb-4 opacity-50">🔍</div>
+            <p class="text-lg font-medium text-slate-600">ไม่พบเลขที่นี้ในระบบ</p>
+            <p class="text-xs text-slate-400 mt-1">หากเพิ่งแก้ไขในชีต อาจต้องรอ Google อัปเดตไฟล์สักครู่</p>
+        </div>
+    </div>
+
+    <script>
+        // Google Sheet CSV Export Link
+        const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQvO8-gsfDKbr2EyQAErZSV33lSkUnaCp63ESHhZ82w5vAkLpUQLOijGwAa5u2Dr3jDcM5STMGi_OqK/pub?output=csv';
+
+        let masterData = [];
+
+        async function init(isSilent = false, force = false) {
+            const searchLoader = document.getElementById('searchLoader');
+            const liveIndicator = document.getElementById('liveIndicator');
+            const refreshIcon = document.getElementById('refreshIcon');
+            
+            if (!isSilent) searchLoader.classList.remove('hidden');
+            if (force) refreshIcon.classList.add('animate-spin');
+            
+            try {
+                // Bypass cache with timestamp and fetch options
+                const response = await fetch(`${CSV_URL}&nocache=${Date.now()}`, {
+                    cache: 'no-store',
+                    headers: { 'Cache-Control': 'no-cache' }
+                });
+                
+                if (!response.ok) throw new Error('Network error');
+                const text = await response.text();
+                
+                parseData(text);
+                
+                const now = new Date();
+                document.getElementById('lastSyncTime').innerText = `Sync ล่าสุด: ${now.toLocaleTimeString('th-TH')}`;
+                liveIndicator.classList.remove('hidden');
+            } catch (err) {
+                console.error('Fetch error:', err);
+                liveIndicator.classList.add('hidden');
+            } finally {
+                searchLoader.classList.add('hidden');
+                refreshIcon.classList.remove('animate-spin');
+            }
+        }
+
+        function getTimestampValue(timeStr) {
+            if (!timeStr) return 0;
+            try {
+                const parts = timeStr.split(/[\/\s:-]/);
+                if (parts.length < 3) return 0;
+
+                let d = parseInt(parts[0]);
+                let m = parseInt(parts[1]) - 1;
+                let y = parseInt(parts[2]);
+                
+                // Convert Thai Buddhist Year to Christian Year if necessary
+                if (y > 2400) y -= 543;
+                else if (y < 100) y += 2000;
+                
+                let hh = parseInt(parts[3]) || 0;
+                let mm = parseInt(parts[4]) || 0;
+                let ss = parseInt(parts[5]) || 0;
+
+                return new Date(y, m, d, hh, mm, ss).getTime();
+            } catch (e) {
+                return 0;
+            }
+        }
+
+        function parseData(csv) {
+            const rows = csv.trim().split('\n').map(row => {
+                return row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(cell => cell.replace(/^"|"$/g, '').trim());
+            });
+
+            if (rows.length < 2) return;
+
+            const header = rows[0];
+            const dataRows = rows.slice(1);
+
+            const idCol = header.findIndex(h => h.includes('เลขที่'));
+            const msgCol = header.findIndex(h => h.includes('อยากบอกอะไร'));
+
+            const uniqueMap = new Map();
+            
+            dataRows.forEach(row => {
+                const idValue = row[idCol];
+                if (!idValue || idValue === "") return;
+
+                const currentTimeStr = row[0];
+                const currentTimeVal = getTimestampValue(currentTimeStr);
+                const existingEntry = uniqueMap.get(idValue);
+                
+                // Compare timestamps to keep only the latest entry for each ID
+                if (!existingEntry || currentTimeVal >= getTimestampValue(existingEntry.time)) {
+                    uniqueMap.set(idValue, {
+                        id: idValue,
+                        message: row[msgCol] || '(ไม่มีข้อความ)',
+                        time: currentTimeStr
+                    });
+                }
+            });
+
+            masterData = Array.from(uniqueMap.values());
+            
+            updateStats(masterData.length);
+            
+            const currentSearch = document.getElementById('searchInput').value.trim();
+            render(masterData.filter(d => d.id === currentSearch || d.id.includes(currentSearch)), currentSearch !== "");
+        }
+
+        function render(data, isSearching) {
+            const grid = document.getElementById('messageGrid');
+            const empty = document.getElementById('emptyState');
+            const welcome = document.getElementById('welcomeState');
+            
+            if (!isSearching) {
+                grid.innerHTML = '';
+                grid.classList.add('hidden');
+                empty.classList.add('hidden');
+                welcome.classList.remove('hidden');
+                return;
+            }
+
+            welcome.classList.add('hidden');
+
+            if (data.length === 0) {
+                grid.innerHTML = '';
+                grid.classList.add('hidden');
+                empty.classList.remove('hidden');
+                return;
+            }
+
+            const newContent = data.map(item => `
+                <div class="bg-white border-2 border-blue-50 rounded-2xl p-6 shadow-sm card-animate flex flex-col h-full border-t-4 border-t-blue-600">
+                    <div class="flex items-center justify-between mb-5">
+                        <div class="id-badge text-white font-bold text-xl px-5 py-2 rounded-2xl shadow-lg min-w-[70px] text-center">
+                            ${item.id}
+                        </div>
+                        <div class="text-[10px] text-slate-400 font-semibold text-right leading-tight uppercase">
+                            อัปเดตล่าสุด<br>${item.time}
+                        </div>
+                    </div>
+                    <div class="flex-grow">
+                        <p class="text-blue-600 text-[10px] font-bold mb-3 uppercase tracking-[0.2em]">Message Log</p>
+                        <div class="bg-blue-50/50 p-4 rounded-2xl border border-blue-100/50 min-h-[100px] flex items-center justify-center text-center">
+                            <p class="text-slate-700 text-base leading-relaxed italic">
+                                "${item.message}"
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            grid.innerHTML = newContent;
+            grid.classList.remove('hidden');
+            empty.classList.add('hidden');
+        }
+
+        function updateStats(count) {
+            document.getElementById('stats').innerText = `ข้อมูลออนไลน์: ${count} เลขที่`;
+        }
+
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            const val = e.target.value.trim();
+            const filtered = masterData.filter(d => d.id === val || d.id.includes(val));
+            render(filtered, val !== "");
+        });
+
+        window.onload = () => {
+            init();
+            // Auto-refresh every 20 seconds
+            setInterval(() => init(true), 20000);
+        };
+    </script>
+</body>
+</html>
