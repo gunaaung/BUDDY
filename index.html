@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Buddy Message Dashboard - Live Update</title>
+    <title>Buddy Message Dashboard - Specific ID Column</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
@@ -40,11 +40,11 @@
                 <div id="stats" class="text-sm font-medium text-slate-500">
                     กำลังตรวจสอบข้อมูล...
                 </div>
-                <button onclick="init(false, true)" class="flex items-center gap-2 text-[11px] bg-slate-200 hover:bg-blue-600 hover:text-white text-slate-600 px-3 py-1 rounded-full transition-all font-medium">
+                <button onclick="init(false, true)" class="flex items-center gap-2 text-[11px] bg-slate-200 hover:bg-blue-600 hover:text-white text-slate-600 px-3 py-1 rounded-full transition-all font-medium shadow-sm">
                     <svg id="refreshIcon" xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
-                    บังคับดึงข้อมูลใหม่ (Force Refresh)
+                    Force Refresh
                 </button>
                 <div id="lastSyncTime" class="text-[10px] text-slate-400 font-mono italic">
                     Sync ล่าสุด: กำลังโหลด...
@@ -66,13 +66,14 @@
                     <div class="loader"></div>
                 </div>
             </div>
+            <p class="mt-2 text-xs text-slate-400 px-1 italic">ค้นหาจากหัวข้อ: "เลขที่ (ของฉัน) *ไม่ต้องใส่เลข 0 นำหน้า"</p>
         </div>
 
         <!-- Welcome State -->
         <div id="welcomeState" class="flex flex-col items-center py-20 text-slate-400">
             <div class="text-6xl mb-6 opacity-50">⌨️</div>
             <h2 class="text-xl font-medium text-slate-600 mb-2">รอการตรวจสอบ</h2>
-            <p class="text-slate-400 text-center">ระบุเลขที่อ้างอิงด้านบนเพื่อแสดงข้อความล่าสุดของคุณ</p>
+            <p class="text-slate-400 text-center">ระบุเลขที่อ้างอิงของคุณเพื่อแสดงข้อความล่าสุด</p>
         </div>
 
         <div id="messageGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 hidden">
@@ -82,12 +83,11 @@
         <div id="emptyState" class="hidden flex flex-col items-center py-20 text-slate-400">
             <div class="text-5xl mb-4 opacity-50">🔍</div>
             <p class="text-lg font-medium text-slate-600">ไม่พบเลขที่นี้ในระบบ</p>
-            <p class="text-xs text-slate-400 mt-1">หากเพิ่งแก้ไขในชีต อาจต้องรอ Google อัปเดตไฟล์สักครู่</p>
+            <p class="text-xs text-slate-400 mt-1">ข้อมูลอาจใช้เวลา 5-10 นาทีในการอัปเดตจาก Google Sheets</p>
         </div>
     </div>
 
     <script>
-        // Google Sheet CSV Export Link
         const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQvO8-gsfDKbr2EyQAErZSV33lSkUnaCp63ESHhZ82w5vAkLpUQLOijGwAa5u2Dr3jDcM5STMGi_OqK/pub?output=csv';
 
         let masterData = [];
@@ -101,7 +101,6 @@
             if (force) refreshIcon.classList.add('animate-spin');
             
             try {
-                // Bypass cache with timestamp and fetch options
                 const response = await fetch(`${CSV_URL}&nocache=${Date.now()}`, {
                     cache: 'no-store',
                     headers: { 'Cache-Control': 'no-cache' }
@@ -134,7 +133,6 @@
                 let m = parseInt(parts[1]) - 1;
                 let y = parseInt(parts[2]);
                 
-                // Convert Thai Buddhist Year to Christian Year if necessary
                 if (y > 2400) y -= 543;
                 else if (y < 100) y += 2000;
                 
@@ -158,20 +156,25 @@
             const header = rows[0];
             const dataRows = rows.slice(1);
 
-            const idCol = header.findIndex(h => h.includes('เลขที่'));
+            // เจาะจงหัวข้อคอลัมน์ตามที่ระบุ
+            const targetColName = "เลขที่ (ของฉัน) *ไม่ต้องใส่เลข 0 นำหน้า";
+            const idCol = header.findIndex(h => h.trim() === targetColName);
+            
+            // Fallback กรณีหาชื่อเต็มไม่เจอ ให้หาคำว่า "เลขที่" แทน
+            const finalIdCol = idCol !== -1 ? idCol : header.findIndex(h => h.includes('เลขที่'));
             const msgCol = header.findIndex(h => h.includes('อยากบอกอะไร'));
 
             const uniqueMap = new Map();
             
             dataRows.forEach(row => {
-                const idValue = row[idCol];
+                const idValue = row[finalIdCol];
                 if (!idValue || idValue === "") return;
 
                 const currentTimeStr = row[0];
                 const currentTimeVal = getTimestampValue(currentTimeStr);
                 const existingEntry = uniqueMap.get(idValue);
                 
-                // Compare timestamps to keep only the latest entry for each ID
+                // ตรวจสอบและเก็บเฉพาะข้อมูลที่ใหม่ที่สุดตามวันเวลา
                 if (!existingEntry || currentTimeVal >= getTimestampValue(existingEntry.time)) {
                     uniqueMap.set(idValue, {
                         id: idValue,
@@ -249,7 +252,6 @@
 
         window.onload = () => {
             init();
-            // Auto-refresh every 20 seconds
             setInterval(() => init(true), 20000);
         };
     </script>
